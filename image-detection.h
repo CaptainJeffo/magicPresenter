@@ -28,7 +28,7 @@ namespace Gdiplus
 #include "opencv2/highgui.hpp"
 #include "opencv2/calib3d.hpp"
 #include "screen/ScreenImage.h"
-#include "opencv2/nonfree/nonfree.hpp"
+#include "opencv2/xfeatures2d.hpp"
 HWND g_HWND = NULL;
 BOOL CALLBACK EnumWindowsProcMy(HWND hwnd, LPARAM lParam)
 {
@@ -69,7 +69,7 @@ cv::Mat getImage() {
 	ENUM_DISP_ARG arg = { 0 };
 	arg.monId = 2;
 	EnumDisplayMonitors(0, 0, EnumDispProc, reinterpret_cast<LPARAM>(&arg));
-	EnumWindows(EnumWindowsProcMy, 14340);
+	EnumWindows(EnumWindowsProcMy, 12176);
 	HDC hwindowDC, hwindowCompatibleDC;
 
 	int height, width, srcheight, srcwidth;
@@ -129,10 +129,10 @@ std::vector<cv::Point2f> obj_corners(4);
 std::vector<cv::DMatch> matches;
 std::vector<cv::KeyPoint> keypoints_object, keypoints_scene;
 cv::Mat descriptors_object, descriptors_scene;
-cv::SurfFeatureDetector detector(minHessian);
+cv::Ptr<cv::xfeatures2d::SurfFeatureDetector> detector = cv::xfeatures2d::SurfFeatureDetector::create(minHessian);
 
 
-cv::SurfDescriptorExtractor extractor;
+cv::Ptr<cv::xfeatures2d::SurfDescriptorExtractor> extractor = cv::xfeatures2d::SurfDescriptorExtractor::create();
 std::vector<cv::DMatch> good_matches;
 std::vector<cv::Point2f> obj;
 std::vector<cv::Point2f> scene;
@@ -143,25 +143,21 @@ cv::Mat findImage(cv::Mat camImage, std::vector<cv::Point2f>* scene_corners) {
 	try {
 		//cv::SurfDescriptorExtractor extractor;
 
-		std::cout << "FindImage" << std::endl;
 		good_matches.clear();
 		obj.clear();
 		scene.clear();
 
 		progImage = getImage();
-		progImage = cv::imread("d:/work/custom.png", CV_LOAD_IMAGE_COLOR);
+		progImage = cv::imread("d:/work/custom.png", CV_LOAD_IMAGE_COLOR);//image from kinect-studio record
 		//cv::flip(progImage, progImage, 1);
 
 		//-- Step 1: Detect the keypoints using SURF Detector
 
-		detector.detect(progImage, keypoints_object);
-		detector.detect(camImage, keypoints_scene);
+		detector->detect(progImage, keypoints_object);
+		detector->detect(camImage, keypoints_scene);
 		//-- Step 2: Calculate descriptors (feature vectors)
-		std::cout << "FindImage 1" << std::endl;
-		extractor.compute(progImage, keypoints_object, descriptors_object);
-		std::cout << "FindImage 2" << std::endl;
-		extractor.compute(camImage, keypoints_scene, descriptors_scene);
-		std::cout << "FindImage 3" << std::endl;
+		extractor->compute(progImage, keypoints_object, descriptors_object);
+		extractor->compute(camImage, keypoints_scene, descriptors_scene);
 		if (descriptors_object.size().height < 1 || descriptors_object.size().width < 1 || cv::countNonZero(descriptors_object) < 1
 			|| descriptors_scene.size().height < 1 || descriptors_scene.size().width < 1 || cv::countNonZero(descriptors_scene) < 1) {
 			return cv::Mat();
@@ -178,7 +174,7 @@ cv::Mat findImage(cv::Mat camImage, std::vector<cv::Point2f>* scene_corners) {
 		}
 		//-- Draw only "good" matches (i.e. whose distance is less than 3*min_dist )
 		double desired = max_dist - min_dist;
-		desired = desired / 4.;
+		desired = desired / 5.;
 		desired = min_dist + desired;//in lower 3rd distance
 		for (int i = 0; i < descriptors_object.rows; i++)
 		{
@@ -205,7 +201,7 @@ cv::Mat findImage(cv::Mat camImage, std::vector<cv::Point2f>* scene_corners) {
 		cv::Mat img_matches;
 		drawMatches(progImage, keypoints_object, camImage, keypoints_scene,
 			good_matches, img_matches, cv::Scalar::all(-1), cv::Scalar::all(-1),
-			cv::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+			std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
 		perspectiveTransform(obj_corners, *scene_corners, H);
 

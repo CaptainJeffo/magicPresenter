@@ -23,7 +23,8 @@ project( magicPresenter )
 # Find Packages
 find_package( PCL 1.8 REQUIRED )
 #find_package( OpenCV REQUIRED )
-find_package( OpenCV2 REQUIRED )
+#find_package( OpenCV2 REQUIRED )
+find_package( OpenCVTrunk REQUIRED )
 find_package( KinectSDK2 REQUIRED )
 
 if( PCL_FOUND AND OPENCV_FOUND AND KinectSDK2_FOUND )
