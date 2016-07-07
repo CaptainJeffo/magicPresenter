@@ -69,7 +69,7 @@ cv::Mat getImage() {
 	ENUM_DISP_ARG arg = { 0 };
 	arg.monId = 2;
 	EnumDisplayMonitors(0, 0, EnumDispProc, reinterpret_cast<LPARAM>(&arg));
-	EnumWindows(EnumWindowsProcMy, 1248);
+	EnumWindows(EnumWindowsProcMy, 14340);
 	HDC hwindowDC, hwindowCompatibleDC;
 
 	int height, width, srcheight, srcwidth;
@@ -120,41 +120,53 @@ cv::Mat getImage() {
 
 cv::FlannBasedMatcher matcher;
 
-cv::SurfDescriptorExtractor extractor;
 double max_dist = 0; double min_dist = 100;
 int minHessian = 400;
 
-cv::SurfFeatureDetector detector(minHessian);
 cv::Mat progImage;
 
 std::vector<cv::Point2f> obj_corners(4);
-
-cv::Mat descriptors_object, descriptors_scene;
-std::vector<cv::KeyPoint> keypoints_object, keypoints_scene;
 std::vector<cv::DMatch> matches;
+std::vector<cv::KeyPoint> keypoints_object, keypoints_scene;
+cv::Mat descriptors_object, descriptors_scene;
+cv::SurfFeatureDetector detector(minHessian);
+
+
+cv::SurfDescriptorExtractor extractor;
+std::vector<cv::DMatch> good_matches;
+std::vector<cv::Point2f> obj;
+std::vector<cv::Point2f> scene;
+
 
 cv::Mat findImage(cv::Mat camImage, std::vector<cv::Point2f>* scene_corners) {
 	cv::Mat H;
 	try {
-		std::vector<cv::DMatch> good_matches;
-		std::vector<cv::Point2f> obj;
-		std::vector<cv::Point2f> scene;
+		//cv::SurfDescriptorExtractor extractor;
+
+		std::cout << "FindImage" << std::endl;
+		good_matches.clear();
+		obj.clear();
+		scene.clear();
 
 		progImage = getImage();
 		progImage = cv::imread("d:/work/custom.png", CV_LOAD_IMAGE_COLOR);
-		cv::flip(progImage, progImage, 1);
+		//cv::flip(progImage, progImage, 1);
 
 		//-- Step 1: Detect the keypoints using SURF Detector
 
 		detector.detect(progImage, keypoints_object);
 		detector.detect(camImage, keypoints_scene);
 		//-- Step 2: Calculate descriptors (feature vectors)
+		std::cout << "FindImage 1" << std::endl;
 		extractor.compute(progImage, keypoints_object, descriptors_object);
+		std::cout << "FindImage 2" << std::endl;
 		extractor.compute(camImage, keypoints_scene, descriptors_scene);
-		//-- Step 3: Matching descriptor vectors using FLANN matcher
-		if (cv::countNonZero(descriptors_object) < 1 || cv::countNonZero(descriptors_scene) < 1) {
+		std::cout << "FindImage 3" << std::endl;
+		if (descriptors_object.size().height < 1 || descriptors_object.size().width < 1 || cv::countNonZero(descriptors_object) < 1
+			|| descriptors_scene.size().height < 1 || descriptors_scene.size().width < 1 || cv::countNonZero(descriptors_scene) < 1) {
 			return cv::Mat();
 		}
+		//-- Step 3: Matching descriptor vectors using FLANN matcher
 		matcher.match(descriptors_object, descriptors_scene, matches);
 		//-- Step 4: find object
 		//-- Quick calculation of max and min distances between keypoints
@@ -208,6 +220,14 @@ cv::Mat findImage(cv::Mat camImage, std::vector<cv::Point2f>* scene_corners) {
 	}
 	catch (cv::Exception ex) {
 		ex.formatMessage();
+		return cv::Mat();
+	}
+	catch (std::exception ex) {
+		std::cout << "ERROR:" << std::endl << ex.what() << std::endl;
+		return cv::Mat();
+	}
+	catch (...) {
+		std::cout << "ERROR:" << std::endl << "No DETAILS =(" << std::endl;
 		return cv::Mat();
 	}
 }

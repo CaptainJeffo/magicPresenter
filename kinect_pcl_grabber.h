@@ -55,6 +55,8 @@ namespace pcl
 		virtual std::string getName() const;
 		virtual float getFramesPerSecond() const;
 		virtual pcl::PointXYZ getWorldCoordinateFromColor(float x, float y);
+		virtual pcl::PointXYZ getWorldCoordinateFromColor_int(int x, int y);
+		float clrImageScale = 2.0;
 
 		typedef void (signal_Kinect2_PointXYZ)(const boost::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>&);
 		typedef void (signal_Kinect2_Body)(const boost::shared_ptr<IBody*[]>&);
@@ -70,7 +72,6 @@ namespace pcl
 		pcl::PointCloud<pcl::PointXYZ>::Ptr cloudMin, cloudMax;
 
 		pcl::PointCloud<pcl::PointXYZ>::Ptr convertDepthToPointXYZ(UINT16* depthBuffer);
-		pcl::PointXYZ getWorldCoordinateFromColor_int(float x, float y);
 
 		boost::thread thread;
 		mutable boost::mutex mutex;
@@ -215,7 +216,7 @@ namespace pcl
 		// To Reserve Depth Frame Buffer
 		depthBuffer.resize(depthWidth * depthHeight);
 		bufferMat.create(clrHeight, clrWidth, CV_8UC4);
-		colorMat.create(clrHeight / 2, clrWidth / 2, CV_8UC4);
+		colorMat.create(clrHeight / clrImageScale, clrWidth / clrImageScale, CV_8UC4);
 
 		signal_PointXYZ = createSignal<signal_Kinect2_PointXYZ>();
 		signal_Body = createSignal<signal_Kinect2_Body>();
@@ -293,7 +294,7 @@ namespace pcl
 		return 30.0f;
 	}
 
-	void getColorData(IMultiSourceFrame* multiFrame, UINT cap, cv::Mat* bufferData, cv::Mat* clrData) {
+	void getColorData(IMultiSourceFrame* multiFrame, UINT cap, cv::Mat* bufferData, cv::Mat* clrData, float imgScale) {
 		HRESULT result(S_OK);
 		IColorFrameReference* clrFrameRef = nullptr;
 		IColorFrame* clrFrame = nullptr;
@@ -305,7 +306,7 @@ namespace pcl
 				if (FAILED(result)) {
 					throw std::exception("Exception : IColorFrame::CopyConvertedFrameDataToArray()");
 				}
-				cv::resize(*bufferData, *clrData, cv::Size(), 1., 1.);
+				cv::resize(*bufferData, *clrData, cv::Size(), 1.0 / imgScale, 1.0 / imgScale);
 				//cv::flip(*clrData, *clrData, 1);
 			}
 			SafeRelease(clrFrame);
@@ -359,8 +360,12 @@ namespace pcl
 			result = multiReader->AcquireLatestFrame(&multiFrame);
 			if (SUCCEEDED(result)) {
 				getDepthFrame(multiFrame, depthBuffer.size(), &depthBuffer[0]);
+				result = mapper->MapColorFrameToCameraSpace(depthWidth*depthHeight, &depthBuffer[0], clrWidth*clrHeight, cameraSpacePnt);
+				if (FAILED(result)) {
+					throw std::exception("Exception : MapColorFrameToCameraSpace");
+				}
 				getBodyData(multiFrame, BODY_COUNT, bodyData);
-				getColorData(multiFrame, clrBufferSize, &bufferMat, &colorMat);
+				getColorData(multiFrame, clrBufferSize, &bufferMat, &colorMat, clrImageScale);
 			}
 			SafeRelease(multiFrame);
 
@@ -385,6 +390,8 @@ namespace pcl
 	}
 
 	pcl::PointXYZ pcl::Kinect2Grabber::getWorldCoordinateFromColor(float xClr, float yClr) {
+		xClr = xClr * clrImageScale;
+		yClr = yClr * clrImageScale;
 		std::vector<pcl::PointXYZ> pnts(9);
 		float idx = 0.;
 		for (int x = -1; x < 2; x++)
@@ -418,28 +425,12 @@ namespace pcl
 		return ret;
 	}
 
-	pcl::PointXYZ pcl::Kinect2Grabber::getWorldCoordinateFromColor_int(float x, float y) {
-
-		HRESULT hr = mapper->MapColorFrameToCameraSpace(depthWidth*depthHeight, &depthBuffer[0], clrWidth*clrHeight, cameraSpacePnt);
-		if (SUCCEEDED(hr)) {
-			int clrIdx = y * clrWidth + x;
-			CameraSpacePoint camSpacePoint = cameraSpacePnt[clrIdx];
-			pcl::PointXYZ pnt = { camSpacePoint.X,camSpacePoint.Y,camSpacePoint.Z };
-			return pnt;
-		}
-		/*HRESULT hr = mapper->MapColorFrameToDepthSpace(depthWidth * depthHeight, &depthBuffer[0], clrWidth * clrHeight, cameraSpacePnt);
-		if (SUCCEEDED(hr)) {
-			size_t clrIdx = y * clrWidth + x;
-			DepthSpacePoint depthSpacePoint = cameraSpacePnt[clrIdx];
-			UINT16 depth = depthBuffer[depthSpacePoint.Y * depthWidth + depthSpacePoint.X];
-			CameraSpacePoint cameraSpacePoint = { 0.0f, 0.0f, 0.0f };
-			hr = mapper->MapDepthPointToCameraSpace(depthSpacePoint, depth, &cameraSpacePoint);
-			if (SUCCEEDED(hr)) {
-				pcl::PointXYZ pnt = { cameraSpacePoint.X,cameraSpacePoint.Y,cameraSpacePoint.Z };
-				return pnt;
-			}
-		}*/
-		return pcl::PointXYZ();
+	pcl::PointXYZ pcl::Kinect2Grabber::getWorldCoordinateFromColor_int(int x, int y) {
+		int clrIdx = y * clrWidth + x;
+		if (clrIdx < 0 || clrIdx > clrWidth * clrHeight) return pcl::PointXYZ(0., 0., 0.);
+		CameraSpacePoint camSpacePoint = cameraSpacePnt[clrIdx];
+		pcl::PointXYZ pnt = { camSpacePoint.X, camSpacePoint.Y, camSpacePoint.Z };
+		return pnt;
 	}
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr pcl::Kinect2Grabber::convertDepthToPointXYZ(UINT16* depthBuffer)

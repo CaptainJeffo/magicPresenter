@@ -27,6 +27,7 @@ find_package( OpenCV2 REQUIRED )
 find_package( KinectSDK2 REQUIRED )
 
 if( PCL_FOUND AND OPENCV_FOUND AND KinectSDK2_FOUND )
+  
   add_executable( magicPresenter kinect_pcl_grabber.h detection-utils.h image-detection.h screen/ScreenImage.h screen/ScreenImage.cpp main.cpp )
   #add_executable( magicPresenter screen/stdafx.cpp screen/stdafx.h)
   
@@ -36,7 +37,6 @@ if( PCL_FOUND AND OPENCV_FOUND AND KinectSDK2_FOUND )
   include_directories( ${KinectSDK2_INCLUDE_DIRS} )
 
   # Preprocessor Definitions
-  add_definitions( -DDUO_GRABBER )
   add_definitions( ${PCL_DEFINITIONS} )
 
   # Additional Library Directories
@@ -48,5 +48,7 @@ if( PCL_FOUND AND OPENCV_FOUND AND KinectSDK2_FOUND )
   target_link_libraries( magicPresenter ${PCL_LIBRARIES} )
   target_link_libraries( magicPresenter ${OPENCVSDK_LIBRARIES} )
   target_link_libraries( magicPresenter ${KinectSDK2_LIBRARIES} )
+  
+  set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 endif()
 

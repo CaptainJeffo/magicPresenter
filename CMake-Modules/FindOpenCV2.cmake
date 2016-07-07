@@ -49,7 +49,7 @@ endif()
 # Root Directoty
 set(OPENCVSDK_DIR)
 if(OPENCV_FOUND)
-  set(OPENCVSDK_DIR c:/opencv/2.4/build/x64/vc12 CACHE PATH "OPENCV Motion SDK Install Path." FORCE)
+  set(OPENCVSDK_DIR d:/Tools/opencv/2.4/build/x64/vc12 CACHE PATH "OPENCV Motion SDK Install Path." FORCE)
   check_dir(OPENCVSDK_DIR)
 endif()
 

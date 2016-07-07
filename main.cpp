@@ -35,10 +35,17 @@ limitations under the License.
 
 #define LEFT	0
 #define RIGHT	1
-
+enum DebugInfo
+{
+	None = 0,
+	PointCloud = 0x1,
+	OpenCV = 0x2,
+	HitPoints = 0x4,
+	Corners = 0x8
+};
 //typedef pcl::PointXYZRGBA PointType;
 typedef pcl::PointXYZ PointType;
-bool active = false, detectPlane = false, findScreen = true;
+bool active = false, detectingPlane = true, findScreen = false, planeDetected = false;
 
 // PCL Visualizer
 boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(
@@ -49,9 +56,10 @@ cv::Mat clrImage;
 std::string cloudId = "cloud";
 
 bool updated = false, clrImageAvailable = false;
+
 pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-pcl::ModelCoefficients::ConstPtr preziPlane = nullptr;
-float hitPoints[BODY_COUNT][2][3];
+pcl::ModelCoefficients::ConstPtr preziPlane;
+Eigen::Vector3f hitPoints[1/*BODY_COUNT*/][4];
 
 void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elbow, int side, Joint* joints) {
 	static float measureVector[] = { 0., 0., 0. };
@@ -64,10 +72,10 @@ void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elb
 		if (tmp > 0) {//Schnittpunkt existiert.
 			float dist = ((-preziPlane->values[3] - preziPlane->values[0] * joints[hand].Position.X - preziPlane->values[1] * joints[hand].Position.Y - preziPlane->values[2] * joints[hand].Position.Z) / tmp);
 			if (dist > 0) {
-				hitPoints[bdyIdx][side][0] = joints[hand].Position.X + dist * measureVector[0];
-				hitPoints[bdyIdx][side][1] = joints[hand].Position.Y + dist * measureVector[1];
-				hitPoints[bdyIdx][side][2] = joints[hand].Position.Z + dist * measureVector[2];
-				cout << "HIT:" << std::to_string(bdyIdx) << " SIDE:" << std::to_string(side) << endl;
+				hitPoints[bdyIdx][side] = Eigen::Vector3f(
+					joints[hand].Position.X + dist * measureVector[0],
+					joints[hand].Position.Y + dist * measureVector[1],
+					joints[hand].Position.Z + dist * measureVector[2]);
 			}
 		}
 	}
@@ -76,25 +84,130 @@ void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elb
 void calculateHitPoints(IBody* curBdy, int bdyIdx) {
 	BOOLEAN* status = nullptr;
 	HRESULT result(S_OK);
-	for (int curHand = 0; curHand < 2; curHand++)
-	{
-		for (int coord = 0; coord < 3; coord++)
-		{
-			hitPoints[bdyIdx][curHand][coord] = 0;
-		}
-	}
 	Joint joints[JointType_Count];
 	result = curBdy->GetJoints(JointType_Count, joints);
 	if (SUCCEEDED(result)) {
+		//calculateHitPoints(curBdy, bdyIdx, JointType_HandLeft, JointType_Head, LEFT, joints);
+		//calculateHitPoints(curBdy, bdyIdx, JointType_HandRight, JointType_Head, RIGHT, joints);
 		calculateHitPoints(curBdy, bdyIdx, JointType_HandLeft, JointType_ElbowLeft, LEFT, joints);
 		calculateHitPoints(curBdy, bdyIdx, JointType_HandRight, JointType_ElbowRight, RIGHT, joints);
 	}
 }
 
 std::vector<cv::Point2f> scene_corners(4);
-std::vector<pcl::PointXYZ> presentCorners(4);
+std::vector<pcl::PointXYZ> presentCorners = {
+	{ 0,0,0 } ,
+	{ 0,0,0 } ,
+	{ 0,0,0 } ,
+	{ 0,0,0 } };//(4);
 cv::Mat H;
 
+void DetectPlane(pcl::PointCloud<PointType>::Ptr ptr) {
+	preziPlane = findCluster_PlaneSegmentation(ptr, inliers);
+
+	if (preziPlane->values.size() == 4) {
+		if (viewer->contains("plane")) {
+			viewer->removeShape("plane", 0);
+		}
+		viewer->addPlane(*preziPlane, "plane", 0);
+		viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, "plane", 0);//R,G,B
+		viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, "plane", 0);
+		viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, "plane", 0);
+		planeDetected = true;
+	}
+	else {
+		detectingPlane = true;
+	}
+}
+
+void MarkHitPoints() {
+	if (planeDetected) {
+		for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
+		{
+			for (int handIdx = 0; handIdx < 2; handIdx++)
+			{
+				std::string id = "hitPnt" + std::to_string(bdyIdx) + "_" + std::to_string(handIdx);
+				if (hitPoints[bdyIdx][handIdx][0] == 0
+					&& hitPoints[bdyIdx][handIdx][1] == 0
+					&& hitPoints[bdyIdx][handIdx][2] == 0) {
+					continue;
+				}
+				//if (hitPoints[i][handIdx][0] < -1 || hitPoints[i][handIdx][1] > 4) { continue; }
+
+				/*Eigen::Affine3f pose = (Eigen::Affine3f)Eigen::Translation3f(
+				hitPoints[bdyIdx][handIdx][0] - hitPoints[bdyIdx][handIdx + 2][0],
+				hitPoints[bdyIdx][handIdx][1] - hitPoints[bdyIdx][handIdx + 2][1],
+				hitPoints[bdyIdx][handIdx][2] - hitPoints[bdyIdx][handIdx + 2][2]);
+
+				hitPoints[bdyIdx][handIdx + 2] = Eigen::Vector3f(
+				hitPoints[bdyIdx][handIdx][0],
+				hitPoints[bdyIdx][handIdx][1],
+				hitPoints[bdyIdx][handIdx][2]);
+				if (!viewer->updateShapePose(id, pose)) {
+				viewer->addCube(hitPoints[bdyIdx][handIdx][0] - .05, hitPoints[bdyIdx][handIdx][0] + .05,
+				hitPoints[bdyIdx][handIdx][1] - .05, hitPoints[bdyIdx][handIdx][1] + .05,
+				hitPoints[bdyIdx][handIdx][2] - .05, hitPoints[bdyIdx][handIdx][2] + .05,
+				0.2, 0.2, 0.9, //RGB
+				id, 0);
+				}*/
+				if (viewer->contains(id)) {
+					viewer->removeShape(id, 0);
+				}
+				viewer->addCube(hitPoints[bdyIdx][handIdx][0] - .05, hitPoints[bdyIdx][handIdx][0] + .05,
+					hitPoints[bdyIdx][handIdx][1] - .05, hitPoints[bdyIdx][handIdx][1] + .05,
+					hitPoints[bdyIdx][handIdx][2] - .05, hitPoints[bdyIdx][handIdx][2] + .05,
+					0.2, 0.2, 0.9, //RGB
+					id, 0);
+
+				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.9, 0.1, id, 0);//R,G,B
+				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
+				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
+			}
+		}
+	}
+}
+
+void FindScreen(boost::shared_ptr<pcl::Kinect2Grabber> grabber) {
+	if (findScreen) {
+		H = findImage(clrImage, &scene_corners);
+		std::vector<cv::KeyPoint> pnts(4);
+		for (int i = 0; i < 4; i++)
+		{
+			cv::Point2f corner = scene_corners[i];
+			pnts[i] = cv::KeyPoint(corner.x, corner.y, 5.);
+			presentCorners[i] = grabber->getWorldCoordinateFromColor_int(scene_corners[i].x * grabber->clrImageScale, scene_corners[i].y * grabber->clrImageScale);
+		}
+		cv::Mat clrImageC;
+		clrImage.copyTo(clrImageC);
+		try {
+			cv::drawKeypoints(clrImageC, pnts, clrImageC, cv::Scalar::all(-1), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::imshow("Color", clrImageC);
+		}
+		catch (cv::Exception e) {
+			e.formatMessage();
+		}
+		for (int cornerIdx = 0; cornerIdx < 4; cornerIdx++)
+		{
+			pcl::PointXYZ pnt = presentCorners[cornerIdx];
+			std::string id = "corner" + std::to_string(cornerIdx);
+			if (viewer->contains(id)) {
+				viewer->removeShape(id, 0);
+			}
+			viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+				0.9, 0.9, 1, //RGB
+				id, 0);
+			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, id, 0);//R,G,B
+			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
+			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
+		}
+	}
+	else {
+		cv::imshow("Color", clrImage);
+		//std::vector<cv::Point2f> input(1), output(1);
+		//input[0] = cvPoint(0, 0);
+		//perspectiveTransform(input, output, -H);
+	}
+}
 
 int main(int argc, char* argv[])
 {
@@ -118,38 +231,44 @@ int main(int argc, char* argv[])
 				}
 			}
 			else {
-				detectPlane = true;
+				planeDetected = false;
+				detectingPlane = true;
 				active = true;
 			}
 		}
 		else if (cb.getKeySym() == "s" && cb.keyDown()) {
 			findScreen = !findScreen;
+			if (!findScreen && !planeDetected) {
+				findScreen = !findScreen;
+				std::cout << "Let's detect the plane first ;)" << std::endl;
+			}
 			if (!findScreen)
 				for (int cornerIdx = 0; cornerIdx < 4; cornerIdx++)
 				{
+					if (scene_corners[cornerIdx].x == 0 && scene_corners[cornerIdx].y == 0) continue;
+					//get smoothed values
 					presentCorners[cornerIdx] = grabber->getWorldCoordinateFromColor(scene_corners[cornerIdx].x, scene_corners[cornerIdx].y);
-					pcl::PointXYZ pnt = presentCorners[cornerIdx];
-					
-					float tmp = (preziPlane->values[0] * pnt.x) + (preziPlane->values[1] * pnt.y) + (preziPlane->values[2] * pnt.z);
+					//only on plane
+					float tmp = (preziPlane->values[0] * presentCorners[cornerIdx].x) + (preziPlane->values[1] * presentCorners[cornerIdx].y) + (preziPlane->values[2] * presentCorners[cornerIdx].z);
 					if (tmp > 0) {//Schnittpunkt existiert.
-						float dist = ((-preziPlane->values[3] - preziPlane->values[0] * 0 - preziPlane->values[1] * 0 - preziPlane->values[2] * 0) / tmp);
+						float dist = ((-preziPlane->values[3]) / tmp);
 						if (dist > 0) {
-							pnt.x = dist * pnt.x;
-							pnt.y = dist * pnt.y;
-							pnt.z = dist * pnt.z;
-
-							std::string id = "corner" + std::to_string(cornerIdx);
-							if (viewer->contains(id)) {
-								viewer->removeShape(id);
-							}
-							viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
-								0.9, 0.9, 1, //RGB
-								id);
-							viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, id, 0);//R,G,B
-							viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
-							viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
+							presentCorners[cornerIdx].x = presentCorners[cornerIdx].x * dist;
+							presentCorners[cornerIdx].y = presentCorners[cornerIdx].y * dist;
+							presentCorners[cornerIdx].z = presentCorners[cornerIdx].z * dist;
 						}
 					}
+					pcl::PointXYZ pnt = presentCorners[cornerIdx];
+					std::string id = "corner" + std::to_string(cornerIdx);
+					if (viewer->contains(id)) {
+						viewer->removeShape(id, 0);
+					}
+					viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+						0.9, 0.9, 1, //RGB
+						id, 0);
+					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, id, 0);//R,G,B
+					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
+					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
 				}
 		}
 	};
@@ -161,14 +280,20 @@ int main(int argc, char* argv[])
 	boost::mutex mutex;
 	boost::function<void(const boost::shared_ptr<IBody*[]>&)> functionBdy =
 		[&cloud, &mutex](const boost::shared_ptr<IBody*[]>& ptr) {
-		if (preziPlane == nullptr) return;
+		if (!planeDetected) return;
 		HRESULT result(S_OK);
 		boost::mutex::scoped_lock lock(mutex);
 		for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
 		{
 			IBody* curBdy = ptr[bdyIdx];
-			//IBody* curBdy = (*ptr)[bdyIdx];
 			if (curBdy == NULL) { continue; }
+			BOOLEAN tracked = false;
+			result = curBdy->get_IsTracked(&tracked);
+			if (FAILED(result)
+				||
+				!tracked) {
+				continue;
+			}
 			calculateHitPoints(curBdy, bdyIdx);
 		}
 	};
@@ -188,13 +313,11 @@ int main(int argc, char* argv[])
 
 
 	boost::function<void(const boost::shared_ptr<cv::Mat>&)> functionClr =
-		[&cloud, &mutex](const boost::shared_ptr<cv::Mat>& ptr) {
+		[&cloud, &mutex, &grabber](const boost::shared_ptr<cv::Mat>& ptr) {
 		boost::mutex::scoped_lock lock(mutex);
 		ptr->copyTo(clrImage);
 		clrImageAvailable = true;
 	};
-
-
 
 	// Retrieved Point Cloud Callback Function
 	boost::function<void(const pcl::PointCloud<PointType>::Ptr&)> function =
@@ -203,24 +326,10 @@ int main(int argc, char* argv[])
 		boost::mutex::scoped_lock lock(mutex);
 		//cloud = ptr;
 		if (active) {
-
-			if (detectPlane) {
-				preziPlane = findCluster_PlaneSegmentation(ptr, inliers);
-				detectPlane = false;
-
-				if (preziPlane->values.size() == 4) {
-					if (viewer->contains("plane")) {
-						viewer->removeShape("plane", 0);
-					}
-					viewer->addPlane(*preziPlane, "plane", 0);
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, "plane", 0);//R,G,B
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, "plane", 0);
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, "plane", 0);
-
-				}
-				else {
-					detectPlane = true;
-				}
+			if (detectingPlane) {
+				detectingPlane = false;
+				clrImageAvailable = false; //das aktuelle Bild überspringen
+				boost::thread t(boost::bind(&DetectPlane, boost::ref(ptr)));
 			}
 
 			//draw pixel from cloud within plane
@@ -230,34 +339,13 @@ int main(int argc, char* argv[])
 			if (!viewer->updatePointCloud(planeCloud, single_color, cloudId + "_plane")) {
 				viewer->addPointCloud(planeCloud, single_color, cloudId + "_plane");
 			}*/
-			for (int i = 0; i < BODY_COUNT; i++)
-			{
-				for (int handIdx = 0; handIdx < 2; handIdx++)
-				{
-					if (viewer->contains("cube" + std::to_string(i) + "_" + std::to_string(handIdx))) {
-						viewer->removeShape("cube" + std::to_string(i) + "_" + std::to_string(handIdx));
-					}
-					if (hitPoints[i][handIdx][0] == 0
-						&& hitPoints[i][handIdx][1] == 0
-						&& hitPoints[i][handIdx][2] == 0) {
-						continue;
-					}
-					if (hitPoints[i][handIdx][1] < -1 || hitPoints[i][handIdx][1] > 4) { continue; }
-
-					viewer->addCube(hitPoints[i][handIdx][0] - .05, hitPoints[i][handIdx][0] + .05, hitPoints[i][handIdx][1] - .05, hitPoints[i][handIdx][1] + .05, hitPoints[i][handIdx][2] - .05, hitPoints[i][handIdx][2] + .05,
-						0.9, 0.9, 1, //RGB
-						"cube" + std::to_string(i) + "_" + std::to_string(handIdx));
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.9, 0.1, "cube" + std::to_string(i) + "_" + std::to_string(handIdx), 0);//R,G,B
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, "cube" + std::to_string(i) + "_" + std::to_string(handIdx), 0);
-					viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, "cube" + std::to_string(i) + "_" + std::to_string(handIdx), 0);
-				}
-			}
 		}
+		
 		pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(ptr, 0, 255, 0);
 		std::vector<int> indices;
 		pcl::removeNaNFromPointCloud(*ptr, *ptr, indices);
 		if (ptr->size() > 100 && !viewer->updatePointCloud(ptr, single_color, cloudId)) {
-			viewer->addPointCloud(ptr, single_color, cloudId);
+			viewer->addPointCloud(ptr, single_color, cloudId, 0);
 		}
 		updated = true;
 	};
@@ -272,7 +360,7 @@ int main(int argc, char* argv[])
 
 	// Start Grabber
 	grabber->start();
-	viewer->addCoordinateSystem(3., 0, 0, 10, 1);
+	viewer->addCoordinateSystem(3., 0, 0, 10, "coords", 0);
 
 	cv::Mat processImg = getImage();
 	cv::flip(processImg, processImg, 1);
@@ -284,18 +372,8 @@ int main(int argc, char* argv[])
 		boost::mutex::scoped_try_lock lock(mutex);
 		if (updated && lock.owns_lock() && clrImageAvailable) {
 			updated = false;
-			cv::imshow("Color", clrImage);
-
-			if (findScreen) {
-				H = findImage(clrImage, &scene_corners);
-
-			}
-			else {
-				//std::vector<cv::Point2f> input(1), output(1);
-				//input[0] = cvPoint(0, 0);
-				//perspectiveTransform(input, output, -H);
-			}
-
+			FindScreen(grabber);
+			MarkHitPoints();
 			viewer->spinOnce();
 		}
 	}
