@@ -45,7 +45,7 @@ enum DebugInfo
 };
 //typedef pcl::PointXYZRGBA PointType;
 typedef pcl::PointXYZ PointType;
-bool active = false, detectingPlane = true, findScreen = false, planeDetected = false;
+bool active = false, detectingPlane = true, findScreen = false, planeDetected = false, screenFound = false;
 
 // PCL Visualizer
 boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(
@@ -60,6 +60,7 @@ bool updated = false, clrImageAvailable = false;
 pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
 pcl::ModelCoefficients::ConstPtr preziPlane;
 Eigen::Vector3f hitPoints[1/*BODY_COUNT*/][4];
+boost::shared_ptr<pcl::Kinect2Grabber> grabber = boost::make_shared<pcl::Kinect2Grabber>();
 
 void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elbow, int side, Joint* joints) {
 	static float measureVector[] = { 0., 0., 0. };
@@ -94,13 +95,10 @@ void calculateHitPoints(IBody* curBdy, int bdyIdx) {
 	}
 }
 
-std::vector<cv::Point2f> scene_corners(4);
-std::vector<pcl::PointXYZ> presentCorners = {
-	{ 0,0,0 } ,
-	{ 0,0,0 } ,
-	{ 0,0,0 } ,
-	{ 0,0,0 } };//(4);
-cv::Mat H;
+boost::shared_ptr<std::vector<cv::Point2f>> scene_corners(new std::vector<cv::Point2f>(4));
+std::vector<pcl::PointXYZ> presentCorners(4);
+boost::shared_ptr<cv::Mat> Homography(new cv::Mat);
+std::vector<cv::KeyPoint> clrImgCornerKeypoints(4);
 
 void DetectPlane(pcl::PointCloud<PointType>::Ptr ptr) {
 	preziPlane = findCluster_PlaneSegmentation(ptr, inliers);
@@ -120,6 +118,27 @@ void DetectPlane(pcl::PointCloud<PointType>::Ptr ptr) {
 	}
 }
 
+void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgScale, float imgWidth, float imgHeight) {
+	HDC screenDC = ::GetDC(0);   
+	RECT desktop;
+	// Get a handle to the desktop window
+	const HWND hDesktop = GetDesktopWindow();
+	// Get the size of screen to the variable desktop
+	if (!GetWindowRect(hDesktop, &desktop)) {
+		return;
+	}
+	float transW = imgScale / imgWidth * (float)(desktop.right - desktop.left);
+	float transH = imgScale / imgHeight * (float)(desktop.bottom - desktop.top);
+
+	for each (cv::Point2f var in pnts)
+	{
+		::SetBkColor(screenDC, RGB(255, 76, 246));
+		::Rectangle(screenDC, var.x * transW + desktop.left, var.y * transH + desktop.top, var.x * transW + desktop.left+ 10, var.y * transH + desktop.top + 10);
+	}
+	::ReleaseDC(0, screenDC);
+
+}
+
 void MarkHitPoints() {
 	if (planeDetected) {
 		for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
@@ -132,24 +151,6 @@ void MarkHitPoints() {
 					&& hitPoints[bdyIdx][handIdx][2] == 0) {
 					continue;
 				}
-				//if (hitPoints[i][handIdx][0] < -1 || hitPoints[i][handIdx][1] > 4) { continue; }
-
-				/*Eigen::Affine3f pose = (Eigen::Affine3f)Eigen::Translation3f(
-				hitPoints[bdyIdx][handIdx][0] - hitPoints[bdyIdx][handIdx + 2][0],
-				hitPoints[bdyIdx][handIdx][1] - hitPoints[bdyIdx][handIdx + 2][1],
-				hitPoints[bdyIdx][handIdx][2] - hitPoints[bdyIdx][handIdx + 2][2]);
-
-				hitPoints[bdyIdx][handIdx + 2] = Eigen::Vector3f(
-				hitPoints[bdyIdx][handIdx][0],
-				hitPoints[bdyIdx][handIdx][1],
-				hitPoints[bdyIdx][handIdx][2]);
-				if (!viewer->updateShapePose(id, pose)) {
-				viewer->addCube(hitPoints[bdyIdx][handIdx][0] - .05, hitPoints[bdyIdx][handIdx][0] + .05,
-				hitPoints[bdyIdx][handIdx][1] - .05, hitPoints[bdyIdx][handIdx][1] + .05,
-				hitPoints[bdyIdx][handIdx][2] - .05, hitPoints[bdyIdx][handIdx][2] + .05,
-				0.2, 0.2, 0.9, //RGB
-				id, 0);
-				}*/
 				if (viewer->contains(id)) {
 					viewer->removeShape(id, 0);
 				}
@@ -158,30 +159,31 @@ void MarkHitPoints() {
 					hitPoints[bdyIdx][handIdx][2] - .05, hitPoints[bdyIdx][handIdx][2] + .05,
 					0.2, 0.2, 0.9, //RGB
 					id, 0);
-
-				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.9, 0.1, id, 0);//R,G,B
-				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
-				//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
 			}
 		}
 	}
 }
 
-void FindScreen(boost::shared_ptr<pcl::Kinect2Grabber> grabber) {
+void FindScreen() {
 	if (findScreen) {
-		H = findImage(clrImage, &scene_corners);
-		std::vector<cv::KeyPoint> pnts(4);
-		for (int i = 0; i < 4; i++)
+		cv::Mat curImg;
+		clrImage.copyTo(curImg);
+		cv::Mat h = findImage(curImg, scene_corners);
+		if (cv::countNonZero(h) == 0)
 		{
-			cv::Point2f corner = scene_corners[i];
-			pnts[i] = cv::KeyPoint(corner.x, corner.y, 5.);
-			presentCorners[i] = grabber->getWorldCoordinateFromColor_int(scene_corners[i].x * grabber->clrImageScale, scene_corners[i].y * grabber->clrImageScale);
+			return;
 		}
-		cv::Mat clrImageC;
-		clrImage.copyTo(clrImageC);
+		h.copyTo(*Homography);
+		screenFound = true;
+		for (int crnrIdx = 0; crnrIdx < 4; crnrIdx++)
+		{
+			cv::Point2f corner = (*scene_corners)[crnrIdx];
+			clrImgCornerKeypoints[crnrIdx] = cv::KeyPoint(corner.x, corner.y, 5.);
+			presentCorners[crnrIdx] = grabber->getWorldCoordinateFromColor_int(corner.x * grabber->clrImageScale, corner.y * grabber->clrImageScale);
+		}
 		try {
-			cv::drawKeypoints(clrImageC, pnts, clrImageC, cv::Scalar::all(-1), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-			cv::imshow("Color", clrImageC);
+			cv::drawKeypoints(clrImage, clrImgCornerKeypoints, clrImage, cv::Scalar::all(-1), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			cv::imshow("Color", clrImage);
 		}
 		catch (cv::Exception e) {
 			e.formatMessage();
@@ -196,12 +198,47 @@ void FindScreen(boost::shared_ptr<pcl::Kinect2Grabber> grabber) {
 			viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
 				0.9, 0.9, 1, //RGB
 				id, 0);
-			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, id, 0);//R,G,B
-			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
-			//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
 		}
 	}
 	else {
+		if (planeDetected && screenFound) {
+			std::vector<cv::Point2f> input(BODY_COUNT * 2);
+			cv::drawKeypoints(clrImage, clrImgCornerKeypoints, clrImage, CV_RGB(255, 0, 0), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			int validCntr = 0;
+			for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
+			{
+				for (int handIdx = 0; handIdx < 2; handIdx++)
+				{
+					Eigen::Vector3f hit = hitPoints[bdyIdx][handIdx];
+					if (hit(0) == 0
+						&& hit(1) == 0
+						&& hit(2) == 0) {
+						continue;
+					}
+					cv::Point2f clrHit = grabber->getColorCoordinateFromWorld(hit(0), hit(1), hit(2));
+					if (clrHit.x > 0 && clrHit.y > 0) {
+						input[validCntr++] = clrHit;
+					}
+				}
+			}
+			if (validCntr > 0) {
+				input.resize(validCntr);
+				std::vector<cv::Point2f> output(validCntr);
+				cv::perspectiveTransform(input, output, *Homography);
+				std::vector<cv::KeyPoint> pnts(validCntr);
+				for (int pntIdx = 0; pntIdx < validCntr; pntIdx++)
+				{
+					pnts[pntIdx] = cv::KeyPoint(output[pntIdx], 5.0f);
+				}
+				cv::drawKeypoints(clrImage, pnts, clrImage, CV_RGB(0, 0, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+
+				boost::thread t(boost::bind(&DrawOnScreen, 
+					output, 
+					grabber->clrImageScale,
+					grabber->clrWidth,
+					grabber->clrHeight));//boost::make_shared<std::vector<cv::Point2f>>(output)));
+			}
+		}
 		cv::imshow("Color", clrImage);
 		//std::vector<cv::Point2f> input(1), output(1);
 		//input[0] = cvPoint(0, 0);
@@ -209,13 +246,13 @@ void FindScreen(boost::shared_ptr<pcl::Kinect2Grabber> grabber) {
 	}
 }
 
+
 int main(int argc, char* argv[])
 {
 	// Kinect2Grabber
-	boost::shared_ptr<pcl::Kinect2Grabber> grabber = boost::make_shared<pcl::Kinect2Grabber>();
 	viewer->setCameraPosition(0.0, 0.0, -2.5, 0.0, 0.0, 0.0);
 	boost::function<void(const pcl::visualization::KeyboardEvent&)> keyPressedFunc =
-		[&grabber](const pcl::visualization::KeyboardEvent& cb) {
+		[](const pcl::visualization::KeyboardEvent& cb) {
 		if (cb.getKeySym() == "a" && cb.keyDown()) {
 			initClustering_PlaneSegmentation();
 			if (active) {
@@ -245,9 +282,9 @@ int main(int argc, char* argv[])
 			if (!findScreen)
 				for (int cornerIdx = 0; cornerIdx < 4; cornerIdx++)
 				{
-					if (scene_corners[cornerIdx].x == 0 && scene_corners[cornerIdx].y == 0) continue;
+					if ((*scene_corners)[cornerIdx].x == 0 && (*scene_corners)[cornerIdx].y == 0) continue;
 					//get smoothed values
-					presentCorners[cornerIdx] = grabber->getWorldCoordinateFromColor(scene_corners[cornerIdx].x, scene_corners[cornerIdx].y);
+					presentCorners[cornerIdx] = grabber->getWorldCoordinateFromColor((*scene_corners)[cornerIdx].x, (*scene_corners)[cornerIdx].y);
 					//only on plane
 					float tmp = (preziPlane->values[0] * presentCorners[cornerIdx].x) + (preziPlane->values[1] * presentCorners[cornerIdx].y) + (preziPlane->values[2] * presentCorners[cornerIdx].z);
 					if (tmp > 0) {//Schnittpunkt existiert.
@@ -313,7 +350,7 @@ int main(int argc, char* argv[])
 
 
 	boost::function<void(const boost::shared_ptr<cv::Mat>&)> functionClr =
-		[&cloud, &mutex, &grabber](const boost::shared_ptr<cv::Mat>& ptr) {
+		[&cloud, &mutex](const boost::shared_ptr<cv::Mat>& ptr) {
 		boost::mutex::scoped_lock lock(mutex);
 		ptr->copyTo(clrImage);
 		clrImageAvailable = true;
@@ -321,7 +358,7 @@ int main(int argc, char* argv[])
 
 	// Retrieved Point Cloud Callback Function
 	boost::function<void(const pcl::PointCloud<PointType>::Ptr&)> function =
-		[&cloud, &mutex, &grabber](const pcl::PointCloud<PointType>::Ptr& ptr) {
+		[&cloud, &mutex](const pcl::PointCloud<PointType>::Ptr& ptr) {
 		if (ptr->points.size() == 0) return;
 		boost::mutex::scoped_lock lock(mutex);
 		//cloud = ptr;
@@ -340,7 +377,7 @@ int main(int argc, char* argv[])
 				viewer->addPointCloud(planeCloud, single_color, cloudId + "_plane");
 			}*/
 		}
-		
+
 		pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(ptr, 0, 255, 0);
 		std::vector<int> indices;
 		pcl::removeNaNFromPointCloud(*ptr, *ptr, indices);
@@ -372,9 +409,17 @@ int main(int argc, char* argv[])
 		boost::mutex::scoped_try_lock lock(mutex);
 		if (updated && lock.owns_lock() && clrImageAvailable) {
 			updated = false;
-			FindScreen(grabber);
-			MarkHitPoints();
-			viewer->spinOnce();
+			try {
+				FindScreen();
+				MarkHitPoints();
+				viewer->spinOnce();
+			}
+			catch (cv::Exception e) {
+				e.formatMessage();
+			}
+			catch (std::exception e) {
+				std::cout << e.what() << std::endl;
+			}
 		}
 	}
 
