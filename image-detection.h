@@ -70,7 +70,7 @@ cv::Mat getImage() {
 	ENUM_DISP_ARG arg = { 0 };
 	arg.monId = 2;
 	EnumDisplayMonitors(0, 0, EnumDispProc, reinterpret_cast<LPARAM>(&arg));
-	EnumWindows(EnumWindowsProcMy, 1252);
+	EnumWindows(EnumWindowsProcMy, 9108);
 	HDC hwindowDC, hwindowCompatibleDC;
 
 	int height, width, srcheight, srcwidth;
@@ -147,20 +147,26 @@ cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> 
 		std::vector<cv::KeyPoint> keypoints_object;
 		std::vector<cv::KeyPoint> keypoints_scene;
 		//cv::SurfDescriptorExtractor extractor;
-		if (!good_matches) {
+		if (good_matches == NULL) {
 			good_matches = boost::make_shared<std::vector<cv::DMatch>>(std::vector<cv::DMatch>());
 		}
 		good_matches->clear();
-		if (!obj) {
+		if (obj == NULL) {
 			obj = boost::make_shared<std::vector<cv::Point2f>>(std::vector<cv::Point2f>());
 		}
 		obj->clear();
-		if (!scene) {
+		if (scene == NULL) {
 			scene = boost::make_shared<std::vector<cv::Point2f>>(std::vector<cv::Point2f>());
 		}
 		scene->clear();
-		if (!matcher) {
+		if (matcher == NULL) {
 			matcher = (cv::FlannBasedMatcher::create("FlannBased"));
+		}
+		if (extractor == NULL) {
+			extractor = cv::xfeatures2d::SurfDescriptorExtractor::create();
+		}
+		if (detector == NULL) {
+			detector = (cv::xfeatures2d::SurfFeatureDetector::create(minHessian));
 		}
 
 		progImage = getImage();

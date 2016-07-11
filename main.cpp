@@ -31,10 +31,12 @@ limitations under the License.
 #include <pcl/search/search.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/visualization/cloud_viewer.h>
+#include <windows.h>
 #include "image-detection.h"
 
 #define LEFT	0
 #define RIGHT	1
+
 enum DebugInfo
 {
 	None = 0,
@@ -118,8 +120,20 @@ void DetectPlane(pcl::PointCloud<PointType>::Ptr ptr) {
 	}
 }
 
-void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgScale, float imgWidth, float imgHeight) {
-	HDC screenDC = ::GetDC(0);   
+HWND Cur_HANDLE;
+
+void FindCursor() {
+	Cur_HANDLE = FindWindow(NULL, "Cursor");
+
+	if (Cur_HANDLE == NULL) {
+		throw new std::exception("Cursor not started");
+	}
+}
+
+
+void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight) {
+	/*HDC screenDC = ::GetDC(0);   
+	*/
 	RECT desktop;
 	// Get a handle to the desktop window
 	const HWND hDesktop = GetDesktopWindow();
@@ -127,15 +141,23 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgScale, float imgWidth,
 	if (!GetWindowRect(hDesktop, &desktop)) {
 		return;
 	}
-	float transW = imgScale / imgWidth * (float)(desktop.right - desktop.left);
-	float transH = imgScale / imgHeight * (float)(desktop.bottom - desktop.top);
-
+	const float transW = 1.0 / imgWidth * (float)(desktop.right - desktop.left);
+	const float transH = 1.0 / imgHeight * (float)(desktop.bottom - desktop.top);
+	std::cout << "tW:" << std::to_string(transW) << " iW:" << std::to_string(imgWidth);
+	std::cout << " tH:" << std::to_string(transH) << " iH:" << std::to_string(imgHeight) << std::endl;
 	for each (cv::Point2f var in pnts)
 	{
-		::SetBkColor(screenDC, RGB(255, 76, 246));
-		::Rectangle(screenDC, var.x * transW + desktop.left, var.y * transH + desktop.top, var.x * transW + desktop.left+ 10, var.y * transH + desktop.top + 10);
+		if (var.x < 0 || var.y < 0) { continue; }
+		int x = var.x * transW + desktop.left;
+		int y = var.y * transH + desktop.top;
+		if (x > desktop.right || y > desktop.bottom) { continue; }
+		::MoveWindow(Cur_HANDLE, x, y, 50, 50, false);
+		std::cout << "X:" << std::to_string(x) << " Y:" << std::to_string(y);
+		std::cout << " pX:" << std::to_string(var.x) << " pY:" << std::to_string(var.y) << std::endl;
+		//::SetBkColor(screenDC, RGB(255, 76, 246));
+		//::Rectangle(screenDC, var.x * transW + desktop.left, var.y * transH + desktop.top, var.x * transW + desktop.left+ 10, var.y * transH + desktop.top + 10);
 	}
-	::ReleaseDC(0, screenDC);
+	//::ReleaseDC(0, screenDC);
 
 }
 
@@ -234,7 +256,6 @@ void FindScreen() {
 
 				boost::thread t(boost::bind(&DrawOnScreen, 
 					output, 
-					grabber->clrImageScale,
 					grabber->clrWidth,
 					grabber->clrHeight));//boost::make_shared<std::vector<cv::Point2f>>(output)));
 			}
@@ -249,6 +270,7 @@ void FindScreen() {
 
 int main(int argc, char* argv[])
 {
+	FindCursor();
 	// Kinect2Grabber
 	viewer->setCameraPosition(0.0, 0.0, -2.5, 0.0, 0.0, 0.0);
 	boost::function<void(const pcl::visualization::KeyboardEvent&)> keyPressedFunc =

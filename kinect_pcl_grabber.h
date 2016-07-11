@@ -126,7 +126,7 @@ namespace pcl
 		, depthWidth(512)
 		, depthHeight(424)
 		, clrWidth(1900)
-		, clrHeight(1200)
+		, clrHeight(1080)
 		, clrBufferSize()
 		, depthBuffer()
 		, running(false)
