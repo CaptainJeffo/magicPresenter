@@ -32,7 +32,9 @@ limitations under the License.
 #include <pcl/search/kdtree.h>
 #include <pcl/visualization/cloud_viewer.h>
 #include <windows.h>
+#include <queue>          // std::queue
 #include "image-detection.h"
+#include "Keys/SendKeys.h"
 
 #define LEFT	0
 #define RIGHT	1
@@ -42,8 +44,8 @@ enum DebugInfo
 	None = 0,
 	PointCloud = 0x1,
 	OpenCV = 0x2,
-	HitPoints = 0x4,
-	Corners = 0x8
+	HitPoints = 0x3,
+	Corners = 0x4
 };
 //typedef pcl::PointXYZRGBA PointType;
 typedef pcl::PointXYZ PointType;
@@ -55,13 +57,15 @@ boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(
 
 cv::Mat clrImage;
 
+DebugInfo _debugLvl = DebugInfo::None;
+
 std::string cloudId = "cloud";
 
 bool updated = false, clrImageAvailable = false;
 
 pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
 pcl::ModelCoefficients::ConstPtr preziPlane;
-Eigen::Vector3f hitPoints[1/*BODY_COUNT*/][4];
+Eigen::Vector3f hitPoints[BODY_COUNT][4];
 boost::shared_ptr<pcl::Kinect2Grabber> grabber = boost::make_shared<pcl::Kinect2Grabber>();
 
 void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elbow, int side, Joint* joints) {
@@ -94,6 +98,15 @@ void calculateHitPoints(IBody* curBdy, int bdyIdx) {
 		//calculateHitPoints(curBdy, bdyIdx, JointType_HandRight, JointType_Head, RIGHT, joints);
 		calculateHitPoints(curBdy, bdyIdx, JointType_HandLeft, JointType_ElbowLeft, LEFT, joints);
 		calculateHitPoints(curBdy, bdyIdx, JointType_HandRight, JointType_ElbowRight, RIGHT, joints);
+	}
+}
+
+void checkGesture(IBody* curBdy, int bdyIdx) {
+	BOOLEAN* status = nullptr;
+	HRESULT result(S_OK);
+	Joint joints[JointType_Count];
+	result = curBdy->GetJoints(JointType_Count, joints);
+	if (SUCCEEDED(result)) {
 	}
 }
 
@@ -132,7 +145,7 @@ void FindCursor() {
 
 
 void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight) {
-	/*HDC screenDC = ::GetDC(0);   
+	/*HDC screenDC = ::GetDC(0);
 	*/
 	RECT desktop;
 	// Get a handle to the desktop window
@@ -143,8 +156,10 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight
 	}
 	const float transW = 1.0 / imgWidth * (float)(desktop.right - desktop.left);
 	const float transH = 1.0 / imgHeight * (float)(desktop.bottom - desktop.top);
-	std::cout << "tW:" << std::to_string(transW) << " iW:" << std::to_string(imgWidth);
-	std::cout << " tH:" << std::to_string(transH) << " iH:" << std::to_string(imgHeight) << std::endl;
+	if (_debugLvl >= DebugInfo::HitPoints) {
+		std::cout << "tW:" << std::to_string(transW) << " iW:" << std::to_string(imgWidth);
+		std::cout << " tH:" << std::to_string(transH) << " iH:" << std::to_string(imgHeight) << std::endl;
+	}
 	for each (cv::Point2f var in pnts)
 	{
 		if (var.x < 0 || var.y < 0) { continue; }
@@ -152,8 +167,10 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight
 		int y = var.y * transH + desktop.top;
 		if (x > desktop.right || y > desktop.bottom) { continue; }
 		::MoveWindow(Cur_HANDLE, x, y, 50, 50, false);
-		std::cout << "X:" << std::to_string(x) << " Y:" << std::to_string(y);
-		std::cout << " pX:" << std::to_string(var.x) << " pY:" << std::to_string(var.y) << std::endl;
+		if (_debugLvl >= DebugInfo::HitPoints) {
+			std::cout << "X:" << std::to_string(x) << " Y:" << std::to_string(y);
+			std::cout << " pX:" << std::to_string(var.x) << " pY:" << std::to_string(var.y) << std::endl;
+		}
 		//::SetBkColor(screenDC, RGB(255, 76, 246));
 		//::Rectangle(screenDC, var.x * transW + desktop.left, var.y * transH + desktop.top, var.x * transW + desktop.left+ 10, var.y * transH + desktop.top + 10);
 	}
@@ -200,12 +217,18 @@ void FindScreen() {
 		for (int crnrIdx = 0; crnrIdx < 4; crnrIdx++)
 		{
 			cv::Point2f corner = (*scene_corners)[crnrIdx];
-			clrImgCornerKeypoints[crnrIdx] = cv::KeyPoint(corner.x, corner.y, 5.);
+			if (_debugLvl >= DebugInfo::Corners) {
+				clrImgCornerKeypoints[crnrIdx] = cv::KeyPoint(corner.x, corner.y, 5.);
+			}
 			presentCorners[crnrIdx] = grabber->getWorldCoordinateFromColor_int(corner.x * grabber->clrImageScale, corner.y * grabber->clrImageScale);
 		}
 		try {
-			cv::drawKeypoints(clrImage, clrImgCornerKeypoints, clrImage, cv::Scalar::all(-1), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-			cv::imshow("Color", clrImage);
+			if (_debugLvl >= DebugInfo::Corners) {
+				cv::drawKeypoints(clrImage, clrImgCornerKeypoints, clrImage, cv::Scalar::all(-1), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+			}
+			if (_debugLvl >= DebugInfo::OpenCV) {
+				cv::imshow("Color", clrImage);
+			}
 		}
 		catch (cv::Exception e) {
 			e.formatMessage();
@@ -247,20 +270,24 @@ void FindScreen() {
 				input.resize(validCntr);
 				std::vector<cv::Point2f> output(validCntr);
 				cv::perspectiveTransform(input, output, *Homography);
-				std::vector<cv::KeyPoint> pnts(validCntr);
-				for (int pntIdx = 0; pntIdx < validCntr; pntIdx++)
-				{
-					pnts[pntIdx] = cv::KeyPoint(output[pntIdx], 5.0f);
-				}
-				cv::drawKeypoints(clrImage, pnts, clrImage, CV_RGB(0, 0, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
 
-				boost::thread t(boost::bind(&DrawOnScreen, 
-					output, 
+				if (_debugLvl >= DebugInfo::OpenCV) {
+					std::vector<cv::KeyPoint> pnts(validCntr);
+					for (int pntIdx = 0; pntIdx < validCntr; pntIdx++)
+					{
+						pnts[pntIdx] = cv::KeyPoint(output[pntIdx], 5.0f);
+					}
+					cv::drawKeypoints(clrImage, pnts, clrImage, CV_RGB(0, 0, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+				}
+				boost::thread t(boost::bind(&DrawOnScreen,
+					output,
 					grabber->clrWidth,
 					grabber->clrHeight));//boost::make_shared<std::vector<cv::Point2f>>(output)));
 			}
 		}
-		cv::imshow("Color", clrImage);
+		if (_debugLvl >= DebugInfo::OpenCV) {
+			cv::imshow("Color", clrImage);
+		}
 		//std::vector<cv::Point2f> input(1), output(1);
 		//input[0] = cvPoint(0, 0);
 		//perspectiveTransform(input, output, -H);
@@ -268,8 +295,45 @@ void FindScreen() {
 }
 
 
+CSendKeys m_sk;
+HWND pwrPntHdl;
+
+void PowerPntForward() {
+	m_sk.AppActivate(pwrPntHdl);
+	m_sk.SendKeys(_T("{DELAY 100}{PGDN}"));
+}
+void PowerPntBackward() {
+	m_sk.AppActivate(pwrPntHdl);
+	m_sk.SendKeys(_T("{DELAY 100}{PGUP}"));
+}
+
+BOOL CALLBACK EnumWindowsProcPowerPnt(HWND hwnd, LPARAM lParam)
+{
+	DWORD lpdwProcessId;
+	GetWindowThreadProcessId(hwnd, &lpdwProcessId);
+	if (lpdwProcessId == lParam)
+	{
+		int length = GetWindowTextLength(hwnd);
+		LPSTR title = new CHAR[length];
+		length = GetWindowText(hwnd, title, length);
+		std::cout << title << std::endl;
+		pwrPntHdl = hwnd;
+		return TRUE;
+	}
+	return TRUE;
+}
+
 int main(int argc, char* argv[])
 {
+	if (argc > 0) {
+		//By NAme
+		pwrPntHdl = FindWindow(NULL, argv[1]);//"PowerPoint-Bildschirmpräsentation - [dummy]");
+		//By PID
+		//std::string param(argv[1]);
+		//int num = std::stoi(param);
+		//EnumWindows(EnumWindowsProcPowerPnt, num);
+	}
+	//PowerPntForward();
 	FindCursor();
 	// Kinect2Grabber
 	viewer->setCameraPosition(0.0, 0.0, -2.5, 0.0, 0.0, 0.0);
@@ -295,13 +359,19 @@ int main(int argc, char* argv[])
 				active = true;
 			}
 		}
+		else if (cb.getKeySym() == "k" && cb.keyDown()) {
+			PowerPntForward();
+		}
+		else if (cb.getKeySym() == "l" && cb.keyDown()) {
+			PowerPntBackward();
+		}
 		else if (cb.getKeySym() == "s" && cb.keyDown()) {
 			findScreen = !findScreen;
 			if (!findScreen && !planeDetected) {
 				findScreen = !findScreen;
 				std::cout << "Let's detect the plane first ;)" << std::endl;
 			}
-			if (!findScreen)
+			if (!findScreen) {
 				for (int cornerIdx = 0; cornerIdx < 4; cornerIdx++)
 				{
 					if ((*scene_corners)[cornerIdx].x == 0 && (*scene_corners)[cornerIdx].y == 0) continue;
@@ -329,6 +399,20 @@ int main(int argc, char* argv[])
 					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
 					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);
 				}
+				if (_debugLvl < DebugInfo::OpenCV) {
+					cv::destroyAllWindows();
+				}
+			}
+		}
+		else if (cb.getKeySym() == "d" && cb.keyDown()) {
+			_debugLvl = (DebugInfo)(_debugLvl + 1);
+			if (_debugLvl > 0x4) {
+				_debugLvl = DebugInfo::None;
+			}
+			if (_debugLvl < DebugInfo::OpenCV) {
+				cv::destroyAllWindows();
+			}
+			std::cout << std::to_string(_debugLvl) << std::endl;
 		}
 	};
 	viewer->registerKeyboardCallback(keyPressedFunc);
@@ -400,11 +484,14 @@ int main(int argc, char* argv[])
 			}*/
 		}
 
-		pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(ptr, 0, 255, 0);
-		std::vector<int> indices;
-		pcl::removeNaNFromPointCloud(*ptr, *ptr, indices);
-		if (ptr->size() > 100 && !viewer->updatePointCloud(ptr, single_color, cloudId)) {
-			viewer->addPointCloud(ptr, single_color, cloudId, 0);
+
+		if (_debugLvl >= DebugInfo::PointCloud) {
+			pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(ptr, 0, 255, 0);
+			std::vector<int> indices;
+			pcl::removeNaNFromPointCloud(*ptr, *ptr, indices);
+			if (ptr->size() > 100 && !viewer->updatePointCloud(ptr, single_color, cloudId)) {
+				viewer->addPointCloud(ptr, single_color, cloudId, 0);
+			}
 		}
 		updated = true;
 	};
@@ -421,11 +508,13 @@ int main(int argc, char* argv[])
 	grabber->start();
 	viewer->addCoordinateSystem(3., 0, 0, 10, "coords", 0);
 
-	cv::Mat processImg = getImage();
-	cv::flip(processImg, processImg, 1);
+	if (_debugLvl >= DebugInfo::OpenCV) {
+		cv::Mat processImg = getImage_FromDesktop();
+		cv::flip(processImg, processImg, 1);
 
-	processImg.convertTo(processImg, CV_8UC4);
-	cv::imshow("Process", processImg);
+		processImg.convertTo(processImg, CV_8UC4);
+		cv::imshow("Process", processImg);
+	}
 
 	while (!viewer->wasStopped()) {
 		boost::mutex::scoped_try_lock lock(mutex);
@@ -433,7 +522,9 @@ int main(int argc, char* argv[])
 			updated = false;
 			try {
 				FindScreen();
-				MarkHitPoints();
+				if (_debugLvl >= DebugInfo::HitPoints) {
+					MarkHitPoints();
+				}
 				viewer->spinOnce();
 			}
 			catch (cv::Exception e) {
