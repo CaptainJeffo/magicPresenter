@@ -51,6 +51,8 @@ struct ENUM_DISP_ARG
 
 RECT monitor;
 
+float bestXMatches = 8.0;
+
 // callback function called by EnumDisplayMonitors for each enabled monitor
 BOOL CALLBACK EnumDispProc(HMONITOR hMon, HDC dcMon, RECT* pRcMon, LPARAM lParam)
 {
@@ -216,8 +218,10 @@ cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> 
 		}
 
 		progImage = getImage_FromDesktop();
+		//cv::imwrite("d:/work/screen.jpg", progImage);
 		//progImage = cv::imread("d:/work/custom.png", CV_LOAD_IMAGE_COLOR);//image from kinect-studio record
-		//cv::flip(progImage, progImage, 1);
+		cv::flip(progImage, progImage, 1);
+		cv::resize(progImage, progImage, cv::Size(), 0.5, 0.5);
 
 		//-- Step 1: Detect the keypoints using SURF Detector
 
@@ -242,7 +246,7 @@ cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> 
 		}
 		//-- Draw only "good" matches (i.e. whose distance is less than 3*min_dist )
 		double desired = max_dist - min_dist;
-		desired = desired / 5.;
+		desired = desired / bestXMatches;
 		desired = min_dist + desired;//in lower 3rd distance
 		for (int i = 0; i < (*descriptors_object).rows; i++)
 		{

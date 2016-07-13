@@ -163,7 +163,7 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight
 	for each (cv::Point2f var in pnts)
 	{
 		if (var.x < 0 || var.y < 0) { continue; }
-		int x = var.x * transW + desktop.left;
+		int x = desktop.right - var.x * transW;//image is flipped
 		int y = var.y * transH + desktop.top;
 		if (x > desktop.right || y > desktop.bottom) { continue; }
 		::MoveWindow(Cur_HANDLE, x, y, 50, 50, false);
@@ -325,13 +325,17 @@ BOOL CALLBACK EnumWindowsProcPowerPnt(HWND hwnd, LPARAM lParam)
 
 int main(int argc, char* argv[])
 {
-	if (argc > 0) {
+	if (argc > 1) {
 		//By NAme
 		pwrPntHdl = FindWindow(NULL, argv[1]);//"PowerPoint-Bildschirmpräsentation - [dummy]");
 		//By PID
 		//std::string param(argv[1]);
 		//int num = std::stoi(param);
 		//EnumWindows(EnumWindowsProcPowerPnt, num);
+	}
+	if (argc > 2) {
+		std::string param(argv[2]);
+		bestXMatches = std::stof(param);
 	}
 	//PowerPntForward();
 	FindCursor();
@@ -392,9 +396,26 @@ int main(int argc, char* argv[])
 					if (viewer->contains(id)) {
 						viewer->removeShape(id, 0);
 					}
-					viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
-						0.9, 0.9, 1, //RGB
-						id, 0);
+					if (cornerIdx == 0) {
+						viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+							1, 0, 0, //RGB
+							id, 0);
+					}
+					else if (cornerIdx == 1) {
+						viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+							0, 1, 0, //RGB
+							id, 0);
+					}
+					else if (cornerIdx == 2) {
+						viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+							0, 0, 1, //RGB
+							id, 0);
+					}
+					else if (cornerIdx == 3) {
+						viewer->addCube(pnt.x - .05, pnt.x + .05, pnt.y - .05, pnt.y + .05, pnt.z - .05, pnt.z + .05,
+							1, 1, 1, //RGB
+							id, 0);
+					}
 					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 0.9, 0.1, 0.1, id, 0);//R,G,B
 					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.6, id, 0);
 					//viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION, pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id, 0);

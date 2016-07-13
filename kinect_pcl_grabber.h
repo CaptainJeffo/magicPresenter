@@ -308,6 +308,7 @@ namespace pcl
 					throw std::exception("Exception : IColorFrame::CopyConvertedFrameDataToArray()");
 				}
 				cv::resize(*bufferData, *clrData, cv::Size(), 1.0 / imgScale, 1.0 / imgScale);
+
 				//cv::flip(*clrData, *clrData, 1);
 			}
 			SafeRelease(clrFrame);
