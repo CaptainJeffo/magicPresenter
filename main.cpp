@@ -35,6 +35,7 @@ limitations under the License.
 #include <queue>          // std::queue
 #include "image-detection.h"
 #include "Keys/SendKeys.h"
+#include "HitPoint.h"
 
 #define LEFT	0
 #define RIGHT	1
@@ -65,7 +66,7 @@ bool updated = false, clrImageAvailable = false;
 
 pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
 pcl::ModelCoefficients::ConstPtr preziPlane;
-Eigen::Vector3f hitPoints[BODY_COUNT][4];
+cefoot::HitPoint hitPoints[BODY_COUNT][4];
 boost::shared_ptr<pcl::Kinect2Grabber> grabber = boost::make_shared<pcl::Kinect2Grabber>();
 
 void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elbow, int side, Joint* joints) {
@@ -79,10 +80,13 @@ void calculateHitPoints(IBody* curBdy, int bdyIdx, JointType hand, JointType elb
 		if (tmp > 0) {//Schnittpunkt existiert.
 			float dist = ((-preziPlane->values[3] - preziPlane->values[0] * joints[hand].Position.X - preziPlane->values[1] * joints[hand].Position.Y - preziPlane->values[2] * joints[hand].Position.Z) / tmp);
 			if (dist > 0) {
-				hitPoints[bdyIdx][side] = Eigen::Vector3f(
+				cefoot::HitPoint pnt;
+				pnt.point = Eigen::Vector3f(
 					joints[hand].Position.X + dist * measureVector[0],
 					joints[hand].Position.Y + dist * measureVector[1],
 					joints[hand].Position.Z + dist * measureVector[2]);
+				time(&pnt.creationTime);
+				hitPoints[bdyIdx][side] = pnt;
 			}
 		}
 	}
@@ -144,7 +148,7 @@ void FindCursor() {
 }
 
 
-void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight) {
+void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgScale) {
 	/*HDC screenDC = ::GetDC(0);
 	*/
 	RECT desktop;
@@ -154,23 +158,35 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight
 	if (!GetWindowRect(hDesktop, &desktop)) {
 		return;
 	}
-	const float transW = 1.0 / imgWidth * (float)(desktop.right - desktop.left);
-	const float transH = 1.0 / imgHeight * (float)(desktop.bottom - desktop.top);
+	//const float transW = 1.0 / imgWidth * (float)(desktop.right - desktop.left);
+	//const float transH = 1.0 / imgHeight * (float)(desktop.bottom - desktop.top);
 	if (_debugLvl >= DebugInfo::HitPoints) {
-		std::cout << "tW:" << std::to_string(transW) << " iW:" << std::to_string(imgWidth);
-		std::cout << " tH:" << std::to_string(transH) << " iH:" << std::to_string(imgHeight) << std::endl;
+	//	std::cout << "tW:" << std::to_string(transW) << " iW:" << std::to_string(imgWidth);
+	//	std::cout << " tH:" << std::to_string(transH) << " iH:" << std::to_string(imgHeight) << std::endl;
 	}
 	for each (cv::Point2f var in pnts)
 	{
-		if (var.x < 0 || var.y < 0) { continue; }
-		int x = desktop.right - var.x * transW;//image is flipped
-		int y = var.y * transH + desktop.top;
-		if (x > desktop.right || y > desktop.bottom) { continue; }
-		::MoveWindow(Cur_HANDLE, x, y, 50, 50, false);
-		if (_debugLvl >= DebugInfo::HitPoints) {
-			std::cout << "X:" << std::to_string(x) << " Y:" << std::to_string(y);
-			std::cout << " pX:" << std::to_string(var.x) << " pY:" << std::to_string(var.y) << std::endl;
+		//if (var.x < 0 || var.y < 0) { continue; }
+		int x = desktop.right - var.x * imgScale;// *transW;//image is flipped
+		int y = var.y * imgScale /* * transH*/ + desktop.top;
+		//if (x > desktop.right || y > desktop.bottom) { continue; }
+		if (x > desktop.right) {
+			x = desktop.right;
 		}
+		if (y > desktop.bottom) {
+			y = desktop.bottom;
+		}
+		if (x < desktop.left) {
+			x = desktop.left;
+		}
+		if (y < desktop.top) {
+			y = desktop.top;
+		}
+		::MoveWindow(Cur_HANDLE, x, y, 50, 50, false);
+		//if (_debugLvl >= DebugInfo::HitPoints) {
+		//	std::cout << "X:" << std::to_string(x) << " Y:" << std::to_string(y);
+		//	std::cout << " pX:" << std::to_string(var.x) << " pY:" << std::to_string(var.y) << std::endl;
+		//}
 		//::SetBkColor(screenDC, RGB(255, 76, 246));
 		//::Rectangle(screenDC, var.x * transW + desktop.left, var.y * transH + desktop.top, var.x * transW + desktop.left+ 10, var.y * transH + desktop.top + 10);
 	}
@@ -180,22 +196,25 @@ void DrawOnScreen(std::vector<cv::Point2f> pnts, float imgWidth, float imgHeight
 
 void MarkHitPoints() {
 	if (planeDetected) {
+		time_t curTime;
+		time(&curTime);
 		for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
 		{
 			for (int handIdx = 0; handIdx < 2; handIdx++)
 			{
 				std::string id = "hitPnt" + std::to_string(bdyIdx) + "_" + std::to_string(handIdx);
-				if (hitPoints[bdyIdx][handIdx][0] == 0
-					&& hitPoints[bdyIdx][handIdx][1] == 0
-					&& hitPoints[bdyIdx][handIdx][2] == 0) {
+				if (hitPoints[bdyIdx][handIdx].point[0] == 0
+					&& hitPoints[bdyIdx][handIdx].point[1] == 0
+					&& hitPoints[bdyIdx][handIdx].point[2] == 0) {
 					continue;
 				}
+				if (hitPoints[bdyIdx][handIdx].isObsolete(curTime)) { continue; };
 				if (viewer->contains(id)) {
 					viewer->removeShape(id, 0);
 				}
-				viewer->addCube(hitPoints[bdyIdx][handIdx][0] - .05, hitPoints[bdyIdx][handIdx][0] + .05,
-					hitPoints[bdyIdx][handIdx][1] - .05, hitPoints[bdyIdx][handIdx][1] + .05,
-					hitPoints[bdyIdx][handIdx][2] - .05, hitPoints[bdyIdx][handIdx][2] + .05,
+				viewer->addCube(hitPoints[bdyIdx][handIdx].point[0] - .05, hitPoints[bdyIdx][handIdx].point[0] + .05,
+					hitPoints[bdyIdx][handIdx].point[1] - .05, hitPoints[bdyIdx][handIdx].point[1] + .05,
+					hitPoints[bdyIdx][handIdx].point[2] - .05, hitPoints[bdyIdx][handIdx].point[2] + .05,
 					0.2, 0.2, 0.9, //RGB
 					id, 0);
 			}
@@ -207,12 +226,13 @@ void FindScreen() {
 	if (findScreen) {
 		cv::Mat curImg;
 		clrImage.copyTo(curImg);
-		cv::Mat h = findImage(curImg, scene_corners);
+		cv::Mat h = findImage(curImg, scene_corners, grabber->clrImageScale);
 		if (cv::countNonZero(h) == 0)
 		{
 			return;
 		}
 		h.copyTo(*Homography);
+		//*Homography = h.inv();
 		screenFound = true;
 		for (int crnrIdx = 0; crnrIdx < 4; crnrIdx++)
 		{
@@ -250,18 +270,24 @@ void FindScreen() {
 			std::vector<cv::Point2f> input(BODY_COUNT * 2);
 			cv::drawKeypoints(clrImage, clrImgCornerKeypoints, clrImage, CV_RGB(255, 0, 0), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
 			int validCntr = 0;
+			time_t curTime;
+			time(&curTime);
 			for (int bdyIdx = 0; bdyIdx < BODY_COUNT; bdyIdx++)
 			{
 				for (int handIdx = 0; handIdx < 2; handIdx++)
 				{
-					Eigen::Vector3f hit = hitPoints[bdyIdx][handIdx];
+					cefoot::HitPoint pnt = hitPoints[bdyIdx][handIdx];
+					Eigen::Vector3f hit = pnt.point;
 					if (hit(0) == 0
 						&& hit(1) == 0
 						&& hit(2) == 0) {
 						continue;
 					}
+					if (pnt.isObsolete(curTime)) { continue; }
 					cv::Point2f clrHit = grabber->getColorCoordinateFromWorld(hit(0), hit(1), hit(2));
 					if (clrHit.x > 0 && clrHit.y > 0) {
+						//clrHit.x = clrHit.x * grabber->clrImageScale;
+						//clrHit.y = clrHit.y * grabber->clrImageScale;
 						input[validCntr++] = clrHit;
 					}
 				}
@@ -275,14 +301,13 @@ void FindScreen() {
 					std::vector<cv::KeyPoint> pnts(validCntr);
 					for (int pntIdx = 0; pntIdx < validCntr; pntIdx++)
 					{
-						pnts[pntIdx] = cv::KeyPoint(output[pntIdx], 5.0f);
+						pnts[pntIdx] = cv::KeyPoint(input[pntIdx], 5.0f);
 					}
 					cv::drawKeypoints(clrImage, pnts, clrImage, CV_RGB(0, 0, 255), cv::DrawMatchesFlags::DRAW_OVER_OUTIMG | cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
 				}
 				boost::thread t(boost::bind(&DrawOnScreen,
 					output,
-					grabber->clrWidth,
-					grabber->clrHeight));//boost::make_shared<std::vector<cv::Point2f>>(output)));
+					grabber->clrImageScale));//boost::make_shared<std::vector<cv::Point2f>>(output)));
 			}
 		}
 		if (_debugLvl >= DebugInfo::OpenCV) {

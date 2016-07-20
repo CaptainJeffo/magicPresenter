@@ -189,7 +189,7 @@ boost::shared_ptr<std::vector<cv::Point2f>> obj(new std::vector<cv::Point2f>);
 boost::shared_ptr<std::vector<cv::Point2f>> scene(new std::vector<cv::Point2f>);
 
 
-cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> scene_corners) {
+cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> scene_corners, float imgScale) {
 	cv::Mat H;
 	try {
 		std::vector<cv::KeyPoint> keypoints_object;
@@ -218,10 +218,10 @@ cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> 
 		}
 
 		progImage = getImage_FromDesktop();
-		//cv::imwrite("d:/work/screen.jpg", progImage);
 		//progImage = cv::imread("d:/work/custom.png", CV_LOAD_IMAGE_COLOR);//image from kinect-studio record
+		//cv::imwrite("d:/work/screen.jpg", progImage);
 		cv::flip(progImage, progImage, 1);
-		cv::resize(progImage, progImage, cv::Size(), 0.5, 0.5);
+		cv::resize(progImage, progImage, cv::Size(), 1.0 / imgScale, 1.0 / imgScale);
 
 		//-- Step 1: Detect the keypoints using SURF Detector
 
@@ -276,6 +276,7 @@ cv::Mat findImage(cv::Mat camImage, boost::shared_ptr<std::vector<cv::Point2f>> 
 			std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
 		cv::perspectiveTransform(*obj_corners, *scene_corners, H);
+		H = cv::findHomography(*scene, *obj, CV_RANSAC);
 
 		//-- Draw lines between the corners (the mapped object in the scene - image_2 )
 		cv::line(img_matches, (*scene_corners)[0] + cv::Point2f(progImage.cols, 0), (*scene_corners)[1] + cv::Point2f(progImage.cols, 0), cv::Scalar(0, 255, 0), 4);
