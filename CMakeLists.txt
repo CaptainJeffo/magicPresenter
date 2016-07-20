@@ -23,12 +23,14 @@ project( magicPresenter )
 # Find Packages
 find_package( PCL 1.8 REQUIRED )
 #find_package( OpenCV REQUIRED )
-find_package( OpenCV2 REQUIRED )
+#find_package( OpenCV2 REQUIRED )
+find_package( OpenCVTrunk REQUIRED )
 find_package( KinectSDK2 REQUIRED )
 
 if( PCL_FOUND AND OPENCV_FOUND AND KinectSDK2_FOUND )
   
-  add_executable( magicPresenter kinect_pcl_grabber.h detection-utils.h image-detection.h screen/ScreenImage.h screen/ScreenImage.cpp main.cpp )
+  # screen/ScreenImage.h screen/ScreenImage.cpp
+  add_executable( magicPresenter kinect_pcl_grabber.h HitPoint.h detection-utils.h image-detection.h Keys/SendKeys.h Keys/SendKeys.cpp main.cpp )
   #add_executable( magicPresenter screen/stdafx.cpp screen/stdafx.h)
   
   # Additional Include Directories

@@ -54,9 +54,12 @@ namespace pcl
 		virtual bool isRunning() const;
 		virtual std::string getName() const;
 		virtual float getFramesPerSecond() const;
+		virtual cv::Point2f getColorCoordinateFromWorld(float x, float y, float z);
 		virtual pcl::PointXYZ getWorldCoordinateFromColor(float x, float y);
 		virtual pcl::PointXYZ getWorldCoordinateFromColor_int(int x, int y);
 		float clrImageScale = 2.0;
+		int clrWidth;
+		int clrHeight;
 
 		typedef void (signal_Kinect2_PointXYZ)(const boost::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>&);
 		typedef void (signal_Kinect2_Body)(const boost::shared_ptr<IBody*[]>&);
@@ -98,8 +101,6 @@ namespace pcl
 
 		int depthWidth;
 		int depthHeight;
-		int clrWidth;
-		int clrHeight;
 
 		std::vector<UINT16> depthBuffer;
 		IBody* bodyData[BODY_COUNT] = { 0 };
@@ -125,7 +126,7 @@ namespace pcl
 		, depthWidth(512)
 		, depthHeight(424)
 		, clrWidth(1900)
-		, clrHeight(1200)
+		, clrHeight(1080)
 		, clrBufferSize()
 		, depthBuffer()
 		, running(false)
@@ -307,6 +308,7 @@ namespace pcl
 					throw std::exception("Exception : IColorFrame::CopyConvertedFrameDataToArray()");
 				}
 				cv::resize(*bufferData, *clrData, cv::Size(), 1.0 / imgScale, 1.0 / imgScale);
+
 				//cv::flip(*clrData, *clrData, 1);
 			}
 			SafeRelease(clrFrame);
@@ -387,6 +389,17 @@ namespace pcl
 			}
 
 		}
+	}
+
+	cv::Point2f pcl::Kinect2Grabber::getColorCoordinateFromWorld(float xWlrd, float yWlrd, float zWlrd) {
+		HRESULT result(S_OK);
+		CameraSpacePoint cameraSpacePoint = { xWlrd, yWlrd, zWlrd };
+		ColorSpacePoint clrSpacePoint = { 0.0f, 0.0f};
+		result = mapper->MapCameraPointToColorSpace(cameraSpacePoint, &clrSpacePoint);
+		if (FAILED(result)) {
+			throw new std::exception("Error Mapping coordinates");
+		}
+		return { clrSpacePoint.X / clrImageScale , clrSpacePoint.Y / clrImageScale };
 	}
 
 	pcl::PointXYZ pcl::Kinect2Grabber::getWorldCoordinateFromColor(float xClr, float yClr) {

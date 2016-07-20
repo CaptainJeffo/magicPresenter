@@ -33,7 +33,8 @@ pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
 // Create the segmentation object
 pcl::SACSegmentation<pcl::PointXYZ> seg;
 
-pcl::ModelCoefficients::Ptr oldCoefficients(new pcl::ModelCoefficients);
+const pcl::ModelCoefficients::Ptr oldCoefficients(new pcl::ModelCoefficients);
+const pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
 
 void initClustering_PlaneSegmentation() {
 	seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);//senkrecht auf definierter Achse
@@ -45,13 +46,13 @@ void initClustering_PlaneSegmentation() {
 }
 
 pcl::ModelCoefficients::ConstPtr findCluster_PlaneSegmentation(pcl::PointCloud<PointType>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
-	pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
 	seg.setInputCloud(cloud);
 	seg.segment(*inliers, *coefficients);
 	//Bei Erfolg enthält 'coefficients' die vier Parameter für die Koordinatenform der Ebene
 	//'inliers' enthält die Pixel der Punktwolke, die zu der Ebene gehören
 	if (inliers->indices.size() > 0) {
-		oldCoefficients = coefficients;
+		//std::memcpy(oldCoefficients.get(), coefficients.get(), sizeof(coefficients));
+		*oldCoefficients = *coefficients;
 	}
 	return oldCoefficients;
 }
